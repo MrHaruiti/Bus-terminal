@@ -1,16 +1,19 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-  <meta charset="UTF-8" />
-  <title>Terminal de Ônibus com Frequência</title>
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    .plataforma { margin-bottom: 10px; }
-    .ponto { display: inline-block; width: 40px; height: 40px; margin: 2px; text-align: center; line-height: 40px; border: 1px solid #ccc; }
-    .livre { background: #b6fcb6; }
-    .ocupado { background: #fcbbbb; }
-    form { margin-top: 20px; }
-  </style>
+<meta charset="UTF-8" />
+<title>Terminal de Ônibus - 9 Plataformas</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .plataforma { margin-bottom: 10px; }
+  .ponto {
+    display: inline-block; width: 40px; height: 40px; margin: 2px;
+    text-align: center; line-height: 40px; border: 1px solid #ccc;
+  }
+  .livre { background: #b6fcb6; }
+  .ocupado { background: #fcbbbb; }
+  form { margin-top: 20px; }
+</style>
 </head>
 <body>
 
@@ -21,175 +24,197 @@
 
 <h3>Cadastrar nova linha</h3>
 <form id="formCadastro">
-  <label>Nome da linha: <input type="text" id="nome" required></label><br>
-  <label>Chegada: <input type="datetime-local" id="chegada" required></label><br>
-  <label>Saída: <input type="datetime-local" id="saida" required></label><br>
-  <label>Frequência: 
-    <select id="frequencia">
-      <option value="unica">Única</option>
-      <option value="diaria">Diária</option>
-      <option value="semanal">Semanal</option>
-    </select>
-  </label><br>
+  <label>Código da linha (ex: 1L01): <input type="text" id="codigoLinha" required pattern="^[1-9][LEXSNF][0-9]{2}$" title="Formato: X (1-9), seguido de L/E/X/S/N/F, seguido de 2 dígitos"></label><br>
+  
+  <div id="horariosExtras" style="display:none;">
+    <label>Hora início: <input type="time" id="horaInicio"></label><br>
+    <label>Hora fim: <input type="time" id="horaFim"></label><br>
+  </div>
+  
+  <label>Frequência:</label><br>
+  <label><input type="checkbox" name="diasSemana" value="0">Dom</label>
+  <label><input type="checkbox" name="diasSemana" value="1">Seg</label>
+  <label><input type="checkbox" name="diasSemana" value="2">Ter</label>
+  <label><input type="checkbox" name="diasSemana" value="3">Qua</label>
+  <label><input type="checkbox" name="diasSemana" value="4">Qui</label>
+  <label><input type="checkbox" name="diasSemana" value="5">Sex</label>
+  <label><input type="checkbox" name="diasSemana" value="6">Sáb</label><br>
+  
   <button type="submit">Cadastrar</button>
 </form>
 
 <script>
-  const plataformas = Array.from({ length: 8 }, (_, p) =>
-    Array.from({ length: 12 }, (_, i) => ({
-      ocupado: false,
-      ocupadoAte: null,
-      linha: null,
-      plataforma: p + 1,
-      ponto: i + 1,
-    }))
+  const plataformas = Array.from({ length: 9 }, () =>
+    Array.from({ length: 12 }, () => ({ ocupado: false, linha: null, ocupadoAte: null }))
   );
 
-  // Guarda os registros de linhas base e instâncias diárias ativadas
-  const linhasBase = [];
-  const linhasAtivas = [];
+  const linhas = []; // linhas cadastradas
+  const linhasAtivas = []; // instâncias ativas em tempo real
 
   function desenharPlataformas() {
     const div = document.getElementById('plataformas');
     div.innerHTML = '';
-    plataformas.forEach((plataforma, idx) => {
-      const linhaDiv = document.createElement('div');
-      linhaDiv.className = 'plataforma';
-      linhaDiv.innerHTML = `<strong>Plataforma ${idx + 1}:</strong>`;
-      plataforma.forEach(ponto => {
-        const pontoDiv = document.createElement('div');
-        pontoDiv.className = 'ponto ' + (ponto.ocupado ? 'ocupado' : 'livre');
-        pontoDiv.title = ponto.linha || 'Livre';
-        pontoDiv.innerText = ponto.ponto;
-        linhaDiv.appendChild(pontoDiv);
+    plataformas.forEach((plataforma, i) => {
+      const divPlat = document.createElement('div');
+      divPlat.className = 'plataforma';
+      divPlat.innerHTML = `<strong>Plataforma ${i + 1}:</strong> `;
+      plataforma.forEach((ponto, j) => {
+        const divPonto = document.createElement('div');
+        divPonto.className = 'ponto ' + (ponto.ocupado ? 'ocupado' : 'livre');
+        divPonto.title = ponto.linha || 'Livre';
+        divPonto.innerText = j + 1;
+        divPlat.appendChild(divPonto);
       });
-      div.appendChild(linhaDiv);
+      div.appendChild(divPlat);
     });
   }
 
-  // Retorna a diferença em dias, ignorando horas/minutos
-  function diffDias(d1, d2) {
-    const umDia = 1000 * 60 * 60 * 24;
-    const d1utc = Date.UTC(d1.getFullYear(), d1.getMonth(), d1.getDate());
-    const d2utc = Date.UTC(d2.getFullYear(), d2.getMonth(), d2.getDate());
-    return Math.floor((d2utc - d1utc) / umDia);
+  function tempoParaMinutos(t) {
+    // "HH:MM" -> minutos desde meia-noite
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
   }
 
-  function cloneDate(d) {
-    return new Date(d.getTime());
+  function agoraEmMinutos() {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
   }
 
-  function ajustarDataBaseParaHoje(dataBase) {
-    const hoje = new Date();
-    const base = new Date(dataBase);
-    base.setFullYear(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-    return base;
+  function linhaEstaAtivaHoje(linha, diaSemanaAtual) {
+    if (!linha.frequenciaDias) return true; // única - só ativa sempre (ajustar na ativação)
+    return linha.frequenciaDias.includes(diaSemanaAtual);
   }
 
-  function ativarLinhas() {
+  function alocarLinhas() {
     const agora = new Date();
+    const diaSemana = agora.getDay(); // 0=Dom ...
 
-    linhasBase.forEach(linha => {
-      if (linha.frequencia === 'unica') {
-        // ativa só uma vez se estiver no tempo
-        if (!linha.ativada && new Date(linha.chegada) <= agora && new Date(linha.saida) > agora) {
-          linhasAtivas.push({...linha, alocada: false});
-          linha.ativada = true;
-        }
-      } else if (linha.frequencia === 'diaria') {
-        // cria entrada para o dia atual
-        const chegadaHoje = ajustarDataBaseParaHoje(linha.chegada);
-        const saidaHoje = ajustarDataBaseParaHoje(linha.saida);
-        if (new Date(chegadaHoje) <= agora && new Date(saidaHoje) > agora) {
-          const existe = linhasAtivas.some(l => l.nome === linha.nome && l.chegada === chegadaHoje.toISOString());
-          if (!existe) {
-            linhasAtivas.push({
-              nome: linha.nome,
-              chegada: chegadaHoje.toISOString(),
-              saida: saidaHoje.toISOString(),
-              frequencia: linha.frequencia,
-              alocada: false
-            });
-          }
-        }
-      } else if (linha.frequencia === 'semanal') {
-        // ativa se o dia da semana bater (exemplo: segunda=1, domingo=0)
-        const hojeDia = agora.getDay(); // 0-domingo ... 6-sabado
-        // Por simplicidade vamos ativar toda semana no mesmo dia da semana da data base
-        const baseDia = new Date(linha.chegada).getDay();
-        if (hojeDia === baseDia) {
-          const chegadaHoje = ajustarDataBaseParaHoje(linha.chegada);
-          const saidaHoje = ajustarDataBaseParaHoje(linha.saida);
-          if (new Date(chegadaHoje) <= agora && new Date(saidaHoje) > agora) {
-            const existe = linhasAtivas.some(l => l.nome === linha.nome && l.chegada === chegadaHoje.toISOString());
-            if (!existe) {
-              linhasAtivas.push({
-                nome: linha.nome,
-                chegada: chegadaHoje.toISOString(),
-                saida: saidaHoje.toISOString(),
-                frequencia: linha.frequencia,
-                alocada: false
-              });
-            }
-          }
-        }
-      }
-    });
-  }
-
-  function atualizarRelogio() {
-    const agora = new Date();
-    document.getElementById('relogio').innerText = agora.toLocaleString();
-
-    // liberar pontos que passaram da hora de saída
+    // Limpar pontos que passaram da hora de saída
     plataformas.forEach(plataforma => {
       plataforma.forEach(ponto => {
-        if (ponto.ocupado && new Date(ponto.ocupadoAte) <= agora) {
-          ponto.ocupado = false;
-          ponto.linha = null;
-          ponto.ocupadoAte = null;
+        if (ponto.ocupado && ponto.ocupadoAte) {
+          const horaFimMin = tempoParaMinutos(ponto.ocupadoAte);
+          if (agoraEmMinutos() > horaFimMin) {
+            ponto.ocupado = false;
+            ponto.linha = null;
+            ponto.ocupadoAte = null;
+          }
         }
       });
     });
 
-    ativarLinhas();
+    linhas.forEach(linha => {
+      if (!linhaEstaAtivaHoje(linha, diaSemana)) return;
 
-    // verificar se há linhas para alocar
-    linhasAtivas.forEach(linha => {
-      const chegada = new Date(linha.chegada);
-      const saida = new Date(linha.saida);
+      const horaInicioMin = tempoParaMinutos(linha.horaInicio);
+      let horaFimMin = tempoParaMinutos(linha.horaFim);
 
-      if (!linha.alocada && chegada <= agora && saida > agora) {
-        const pontoLivre = plataformas.flat().find(p => !p.ocupado);
-        if (pontoLivre) {
-          pontoLivre.ocupado = true;
-          pontoLivre.ocupadoAte = linha.saida;
-          pontoLivre.linha = linha.nome;
-          linha.alocada = true;
+      const agoraMin = agoraEmMinutos();
+
+      // Considera fim passado da meia-noite (ex: 01:00 → 25:00)
+      if (horaFimMin <= horaInicioMin) horaFimMin += 24 * 60;
+      let agoraAjustado = agoraMin;
+      if (agoraMin < horaInicioMin) agoraAjustado += 24 * 60;
+
+      if (agoraAjustado >= horaInicioMin && agoraAjustado < horaFimMin) {
+        // Verifica se já está alocada
+        const jaAlocada = plataformas[linha.plataforma - 1].some(p => p.linha === linha.codigo);
+        if (!jaAlocada) {
+          // tenta alocar ponto livre na plataforma da linha
+          const pontoLivre = plataformas[linha.plataforma - 1].find(p => !p.ocupado);
+          if (pontoLivre) {
+            pontoLivre.ocupado = true;
+            pontoLivre.linha = linha.codigo;
+            pontoLivre.ocupadoAte = linha.horaFim;
+          }
         }
+      } else {
+        // Fora do horário, desaloca se estiver
+        plataformas[linha.plataforma - 1].forEach(p => {
+          if (p.linha === linha.codigo) {
+            p.ocupado = false;
+            p.linha = null;
+            p.ocupadoAte = null;
+          }
+        });
       }
     });
 
     desenharPlataformas();
   }
 
-  setInterval(atualizarRelogio, 1000);
-
   document.getElementById('formCadastro').addEventListener('submit', e => {
     e.preventDefault();
-    const nome = document.getElementById('nome').value;
-    const chegada = document.getElementById('chegada').value;
-    const saida = document.getElementById('saida').value;
-    const frequencia = document.getElementById('frequencia').value;
 
-    linhasBase.push({ nome, chegada, saida, frequencia, ativada: false });
+    const codigo = document.getElementById('codigoLinha').value.toUpperCase();
+    if (!/^[1-9][LEXSNF][0-9]{2}$/.test(codigo)) {
+      alert('Código da linha inválido.');
+      return;
+    }
+    const letra = codigo[1];
+    let horaInicio, horaFim;
 
-    document.getElementById('formCadastro').reset();
-    alert('Linha cadastrada com sucesso!');
+    if (letra === 'L') {
+      horaInicio = '05:00';
+      horaFim = '01:00';
+    } else {
+      horaInicio = document.getElementById('horaInicio').value;
+      horaFim = document.getElementById('horaFim').value;
+      if (!horaInicio || !horaFim) {
+        alert('Informe horários para linhas não regulares.');
+        return;
+      }
+    }
+
+    const checkboxes = document.querySelectorAll('input[name="diasSemana"]:checked');
+    const frequenciaDias = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    const freq = frequenciaDias.length > 0 ? frequenciaDias : null;
+
+    linhas.push({
+      codigo,
+      plataforma: parseInt(codigo[0]),
+      letra,
+      horaInicio,
+      horaFim,
+      frequenciaDias: freq,
+    });
+
+    alert('Linha cadastrada: ' + codigo);
+    e.target.reset();
+    document.getElementById('horariosExtras').style.display = 'none';
+
+    desenharPlataformas();
   });
 
+  // Mostrar/ocultar inputs horários extra conforme linha
+  document.getElementById('codigoLinha').addEventListener('input', () => {
+    const val = document.getElementById('codigoLinha').value.toUpperCase();
+    if (val.length < 2) {
+      document.getElementById('horariosExtras').style.display = 'none';
+      return;
+    }
+    const letra = val[1];
+    if (letra === 'L') {
+      document.getElementById('horariosExtras').style.display = 'none';
+    } else if ('EXSNF'.includes(letra)) {
+      document.getElementById('horariosExtras').style.display = 'block';
+    } else {
+      document.getElementById('horariosExtras').style.display = 'none';
+    }
+  });
+
+  // Atualiza relógio e alocação a cada minuto
+  function atualizar() {
+    const agora = new Date();
+    document.getElementById('relogio').innerText = agora.toLocaleString();
+    alocarLinhas();
+  }
+
   desenharPlataformas();
+  atualizar();
+  setInterval(atualizar, 60000); // a cada minuto
 </script>
 
 </body>
 </html>
+
