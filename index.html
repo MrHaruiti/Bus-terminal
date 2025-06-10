@@ -7,11 +7,26 @@
   body { font-family: sans-serif; margin: 20px; }
   .plataforma { margin-bottom: 10px; }
   .ponto {
-    display: inline-block; width: 40px; height: 40px; margin: 2px;
-    text-align: center; line-height: 40px; border: 1px solid #ccc;
+    display: inline-block; width: 70px; height: 50px; margin: 2px;
+    text-align: center; vertical-align: top;
+    border: 1px solid #ccc; border-radius: 4px;
+    font-size: 12px;
+    padding: 3px 5px;
+    box-sizing: border-box;
+    background: #b6fcb6;
+    position: relative;
   }
-  .livre { background: #b6fcb6; }
-  .ocupado { background: #fcbbbb; }
+  .ocupado {
+    background: #fcbbbb;
+  }
+  .linhaCod {
+    font-weight: bold;
+  }
+  .horarios {
+    font-size: 10px;
+    color: #333;
+    margin-top: 2px;
+  }
   form { margin-top: 20px; }
 </style>
 </head>
@@ -45,11 +60,10 @@
 
 <script>
   const plataformas = Array.from({ length: 9 }, () =>
-    Array.from({ length: 12 }, () => ({ ocupado: false, linha: null, ocupadoAte: null }))
+    Array.from({ length: 12 }, () => ({ ocupado: false, linha: null, ocupadoAte: null, ocupadoDesde: null }))
   );
 
-  const linhas = []; // linhas cadastradas
-  const linhasAtivas = []; // instâncias ativas em tempo real
+  const linhas = [];
 
   function desenharPlataformas() {
     const div = document.getElementById('plataformas');
@@ -61,8 +75,15 @@
       plataforma.forEach((ponto, j) => {
         const divPonto = document.createElement('div');
         divPonto.className = 'ponto ' + (ponto.ocupado ? 'ocupado' : 'livre');
-        divPonto.title = ponto.linha || 'Livre';
-        divPonto.innerText = j + 1;
+        if (ponto.ocupado) {
+          divPonto.innerHTML = `<div class="linhaCod">${ponto.linha}</div>
+            <div class="horarios">
+              Chegada: ${ponto.ocupadoDesde}<br>
+              Saída: ${ponto.ocupadoAte}
+            </div>`;
+        } else {
+          divPonto.textContent = j + 1;
+        }
         divPlat.appendChild(divPonto);
       });
       div.appendChild(divPlat);
@@ -70,7 +91,6 @@
   }
 
   function tempoParaMinutos(t) {
-    // "HH:MM" -> minutos desde meia-noite
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
   }
@@ -81,23 +101,28 @@
   }
 
   function linhaEstaAtivaHoje(linha, diaSemanaAtual) {
-    if (!linha.frequenciaDias) return true; // única - só ativa sempre (ajustar na ativação)
+    if (!linha.frequenciaDias) return true;
     return linha.frequenciaDias.includes(diaSemanaAtual);
   }
 
   function alocarLinhas() {
     const agora = new Date();
-    const diaSemana = agora.getDay(); // 0=Dom ...
+    const diaSemana = agora.getDay();
 
-    // Limpar pontos que passaram da hora de saída
     plataformas.forEach(plataforma => {
       plataforma.forEach(ponto => {
         if (ponto.ocupado && ponto.ocupadoAte) {
           const horaFimMin = tempoParaMinutos(ponto.ocupadoAte);
-          if (agoraEmMinutos() > horaFimMin) {
+          const agoraMin = agoraEmMinutos();
+          let fimAjustado = horaFimMin;
+          if (horaFimMin <= tempoParaMinutos('05:00')) fimAjustado += 24 * 60;
+          let agoraAjustado = agoraMin;
+          if (agoraMin < tempoParaMinutos('05:00')) agoraAjustado += 24 * 60;
+          if (agoraAjustado > fimAjustado) {
             ponto.ocupado = false;
             ponto.linha = null;
             ponto.ocupadoAte = null;
+            ponto.ocupadoDesde = null;
           }
         }
       });
@@ -106,12 +131,10 @@
     linhas.forEach(linha => {
       if (!linhaEstaAtivaHoje(linha, diaSemana)) return;
 
-      const horaInicioMin = tempoParaMinutos(linha.horaInicio);
+      let horaInicioMin = tempoParaMinutos(linha.horaInicio);
       let horaFimMin = tempoParaMinutos(linha.horaFim);
-
       const agoraMin = agoraEmMinutos();
 
-      // Considera fim passado da meia-noite (ex: 01:00 → 25:00)
       if (horaFimMin <= horaInicioMin) horaFimMin += 24 * 60;
       let agoraAjustado = agoraMin;
       if (agoraMin < horaInicioMin) agoraAjustado += 24 * 60;
@@ -120,21 +143,21 @@
         // Verifica se já está alocada
         const jaAlocada = plataformas[linha.plataforma - 1].some(p => p.linha === linha.codigo);
         if (!jaAlocada) {
-          // tenta alocar ponto livre na plataforma da linha
           const pontoLivre = plataformas[linha.plataforma - 1].find(p => !p.ocupado);
           if (pontoLivre) {
             pontoLivre.ocupado = true;
             pontoLivre.linha = linha.codigo;
+            pontoLivre.ocupadoDesde = linha.horaInicio;
             pontoLivre.ocupadoAte = linha.horaFim;
           }
         }
       } else {
-        // Fora do horário, desaloca se estiver
         plataformas[linha.plataforma - 1].forEach(p => {
           if (p.linha === linha.codigo) {
             p.ocupado = false;
             p.linha = null;
             p.ocupadoAte = null;
+            p.ocupadoDesde = null;
           }
         });
       }
@@ -186,7 +209,6 @@
     desenharPlataformas();
   });
 
-  // Mostrar/ocultar inputs horários extra conforme linha
   document.getElementById('codigoLinha').addEventListener('input', () => {
     const val = document.getElementById('codigoLinha').value.toUpperCase();
     if (val.length < 2) {
@@ -203,18 +225,21 @@
     }
   });
 
-  // Atualiza relógio e alocação a cada minuto
-  function atualizar() {
+  function atualizarRelogio() {
     const agora = new Date();
     document.getElementById('relogio').innerText = agora.toLocaleString();
+  }
+
+  function atualizarTudo() {
+    atualizarRelogio();
     alocarLinhas();
   }
 
   desenharPlataformas();
-  atualizar();
-  setInterval(atualizar, 60000); // a cada minuto
+  atualizarTudo();
+  setInterval(atualizarTudo, 10000);
+  setInterval(atualizarRelogio, 1000);
 </script>
 
 </body>
 </html>
-
